@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scalp-quiz-db"
+version = "0.1.0"
+description = "Public KRX daily-bar collector and compact offline fingerprint index"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+scalp-db = "scalp_db.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["scalp_db*"]
