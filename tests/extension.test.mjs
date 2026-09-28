@@ -41,7 +41,7 @@ test('normalizes the last three quiz candles and refuses mismatched entry price'
   assert.equal(formatReturnBps(0), '0.00%');
 });
 
-test('accepts only same-window, same-origin, minimal session messages', () => {
+test('copies minimal session data out of Firefox page wrappers and validates message source', () => {
   const source = {};
   const session = asSession([
     ['2025-03-12', 2, 3, 2, 3, 20],
@@ -51,6 +51,18 @@ test('accepts only same-window, same-origin, minimal session messages', () => {
   const event = {source, origin: 'https://scalping.kro.kr',
     data: {type: 'SCALP_QUIZ_SESSIONS', sessions: [session]}};
   assert.deepEqual(sessionsFromMessage(event, source, event.origin), [session]);
+  const denyConstructor = value => new Proxy(value, {get(target, property, receiver) {
+    if (property === 'constructor') throw new Error('Permission denied to access property "constructor"');
+    return Reflect.get(target, property, receiver);
+  }});
+  const wrappedSession = denyConstructor({...session, chart_candles:
+    denyConstructor(session.chart_candles.map(candle => denyConstructor(candle)))});
+  const wrappedEvent = {...event, data: denyConstructor({type: event.data.type,
+    sessions: denyConstructor([wrappedSession])})};
+  const copied = sessionsFromMessage(wrappedEvent, source, event.origin);
+  assert.notEqual(copied[0], wrappedSession);
+  assert.notEqual(copied[0].chart_candles, wrappedSession.chart_candles);
+  assert.deepEqual(structuredClone(copied), [session]);
   assert.equal(sessionsFromMessage({...event, source: {}}, source, event.origin), null);
   assert.equal(sessionsFromMessage({...event, origin: 'https://elsewhere.example'}, source, event.origin), null);
   assert.equal(sessionsFromMessage({...event, data: {...event.data, type: 'OTHER'}}, source, event.origin), null);

@@ -106,7 +106,7 @@
           item?.bars ? [item.id, {text: 'DB 오류', tone: 'error'}]
             : resultFromLookup(item, null, formatReturnBps, index));
         results = new Map(failure);
-        const detail = String(error?.message || 'unknown error').replace(/moz-extension:\/\/[^/\s]+/g,
+        const detail = String(error?.stack || error?.message || 'unknown error').replace(/moz-extension:\/\/[^/\s]+/g,
           'moz-extension://[extension]').slice(0, 160);
         console.warn(`[scalp-quiz] DB lookup failed: ${detail}`);
         queueRender();
