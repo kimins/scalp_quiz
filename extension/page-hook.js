@@ -1,4 +1,4 @@
-// Runs in the page's MAIN world before axios initializes. No Chrome APIs or DB access.
+// Runs in the page's MAIN world before axios initializes. No extension APIs or DB access.
 (() => {
   'use strict';
 

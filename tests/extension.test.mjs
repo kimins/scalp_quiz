@@ -59,6 +59,19 @@ test('accepts only same-window, same-origin, minimal session messages', () => {
   ]}}, source, event.origin), null);
 });
 
+test('manifest declares Firefox Android support and required execution worlds', async () => {
+  const manifest = JSON.parse(await readFile(path.join(root, 'extension/manifest.json'), 'utf8'));
+  assert.ok(manifest.browser_specific_settings.gecko.id);
+  assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '128.0');
+  assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions.required, ['none']);
+  assert.equal(manifest.browser_specific_settings.gecko_android.strict_min_version, '128.0');
+  assert.equal(manifest.content_scripts.find(item => item.js.includes('page-hook.js')).world, 'MAIN');
+  assert.equal(manifest.content_scripts.find(item => item.js.includes('content.js')).world, 'ISOLATED');
+  const content = await readFile(path.join(root, 'extension/content.js'), 'utf8');
+  assert.match(content, /globalThis\.browser\?\.runtime/);
+  assert.match(content, /globalThis\.chrome\?\.runtime/);
+});
+
 test('MAIN-world hook captures fetch and XHR but forwards no auth or extra response fields', async () => {
   const messages = [];
   const candle = {date: '2025-03-14', open: 11950, high: 12260, low: 11950,

@@ -126,6 +126,18 @@ node --test tests/extension.test.mjs
 
 캐시와 DB가 없는 CI에서는 HAR 통합 항목만 건너뜁니다. 로컬에서 해당 두 폴더가 있으면 HAR 6개 사례를 실제 3일 DB에서 모두 조회합니다.
 
+### Firefox for Android
+
+Firefox의 `world: MAIN` 지원이 포함된 Firefox 128 이상을 대상으로 합니다. Manifest에는 Gecko ID, Android 호환 표시, AMO의 데이터 수집 선언(`none`)이 있습니다. Firefox의 MAIN world 지원 시작 버전과 Android용 manifest 설정은 [MDN content_scripts](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/content_scripts), [MDN browser_specific_settings](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/browser_specific_settings)에 맞췄습니다.
+
+Android Firefox는 Chrome의 Load unpacked와 같은 확장 설치 흐름을 제공하지 않습니다. Android에서 설치하려면 XPI를 서명하고 AMO에 등록한 뒤 Android 호환으로 배포해야 합니다. 패키지를 만들려면:
+
+```sh
+python scripts/package_firefox.py
+```
+
+XPI는 기본적으로 `dist/scalp-quiz-lookup-0.2.0.xpi`에 생성됩니다. `extension/db/`와 `extension/lookup.mjs`를 먼저 준비하고, AMO 개발자 페이지에서 이 XPI를 제출·서명한 다음 listing의 Android 호환을 설정합니다. 이 저장소는 AMO 계정에 제출하거나 공개하지 않습니다.
+
 `web/lookup.mjs`는 Web Crypto와 fetch를 사용하는 ES module입니다. manifest/종목 테이블/바이너리를 확장 `db/`에 복사합니다. 다음 예시는 확장 페이지 또는 module service worker에서 실행합니다.
 
 ```js

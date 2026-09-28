@@ -8,6 +8,7 @@ cache/
 data/
 extension/db/
 extension/lookup.mjs
+dist/*.xpi
 *.tmp
 .env
 .env.*
