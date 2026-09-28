@@ -42,15 +42,20 @@
     return dbPromise;
   }
 
-  async function queryDB(items, lookupMessageType) {
+  async function queryDB(items) {
     if (firefoxRuntime) {
-      const response = await firefoxRuntime.sendMessage({
-        type: lookupMessageType,
-        lookups: items.map(({id, bars}) => ({id, bars})),
-      });
-      if (!Array.isArray(response) || response.length !== items.length)
-        throw new Error('Invalid Firefox lookup response');
-      return new Map(response.map(item => [String(item.id), item]));
+      const {encodeLookupRequest, decodeLookupResponse} = await corePromise;
+      console.info(`[scalp-quiz] Firefox lookup request sessions=${items.length}`);
+      let response;
+      try {
+        response = await firefoxRuntime.sendMessage(encodeLookupRequest(items));
+      } catch (error) {
+        const failure = new Error(String(error?.message || 'Firefox message transport failed'));
+        failure.stage = 'runtime-message';
+        throw failure;
+      }
+      const results = decodeLookupResponse(response, items.length);
+      return new Map(results.map(item => [item.id, item]));
     }
 
     const db = await loadDB();
@@ -87,7 +92,7 @@
   async function captureSessions(sessions) {
     if (!Array.isArray(sessions) || sessions.length > 24) return;
     const mine = ++generation;
-    const {normalizeSession, formatReturnBps, LOOKUP_MESSAGE_TYPE} = await corePromise;
+    const {normalizeSession, formatReturnBps} = await corePromise;
     if (mine !== generation) return;
     const normalized = sessions.map(normalizeSession);
     currentSessions = sessions.map(session => ({session_id: session?.session_id}));
@@ -99,16 +104,16 @@
     const lookupItems = normalized.filter(item => item?.bars);
     if (lookupItems.length) {
       try {
-        lookups = await queryDB(lookupItems, LOOKUP_MESSAGE_TYPE);
+        lookups = await queryDB(lookupItems);
       } catch (error) {
         if (mine !== generation) return;
         const failure = normalized.filter(Boolean).map((item, index) =>
           item?.bars ? [item.id, {text: 'DB 오류', tone: 'error'}]
             : resultFromLookup(item, null, formatReturnBps, index));
         results = new Map(failure);
-        const detail = String(error?.stack || error?.message || 'unknown error').replace(/moz-extension:\/\/[^/\s]+/g,
-          'moz-extension://[extension]').slice(0, 160);
-        console.warn(`[scalp-quiz] DB lookup failed: ${detail}`);
+        const detail = String(error?.message || 'unknown error').replace(/moz-extension:\/\/[^/\s]+/g,
+          'moz-extension://[extension]').slice(0, 240);
+        console.warn(`[scalp-quiz] DB lookup failed stage=${error?.stage || 'content-lookup'}: ${detail}`);
         queueRender();
         return;
       }

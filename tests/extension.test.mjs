@@ -6,7 +6,9 @@ import {fileURLToPath} from 'node:url';
 import vm from 'node:vm';
 import {test} from 'node:test';
 import {LookupDB} from '../web/lookup.mjs';
-import {normalizeSession, sessionsFromMessage, formatReturnBps, renderAnnotations} from
+import {normalizeSession, sessionsFromMessage, formatReturnBps, renderAnnotations,
+  encodeLookupRequest, decodeLookupRequest, encodeLookupResponse, decodeLookupResponse,
+  LOOKUP_ERROR_TYPE, LOOKUP_RESPONSE_TYPE} from
   '../extension/quiz-core.mjs';
 import {createLookupHandler, isQuizPageSender, LOOKUP_MESSAGE_TYPE} from '../extension/background-core.mjs';
 
@@ -80,6 +82,7 @@ test('Firefox background batches lookups and loads the DB once', async () => {
     return [];
   }};
   const handle = createLookupHandler(async () => { loads++; return fakeDB; });
+  const stages = [];
   const result = await handle({type: LOOKUP_MESSAGE_TYPE, lookups: [
     {id: 'session-a', bars: [
       ['2025-03-12', 1, 2, 1, 2, 10],
@@ -91,8 +94,9 @@ test('Firefox background batches lookups and loads the DB once', async () => {
       ['2025-03-13', 6, 7, 6, 7, 20],
       ['2025-03-14', 7, 8, 7, 8, 30],
     ]},
-  ]});
+  ]}, stage => stages.push(stage));
   assert.equal(loads, 1);
+  assert.deepEqual(stages, ['request-validation', 'db-load', 'fingerprint-lookup', 'response-build']);
   assert.deepEqual(result.map(item => [item.id, item.status]), [
     ['session-a', 'match'], ['session-b', 'unknown'],
   ]);
@@ -101,6 +105,27 @@ test('Firefox background batches lookups and loads the DB once', async () => {
   await assert.rejects(handle({type: LOOKUP_MESSAGE_TYPE, lookups: [
     {id: 'bad', bars: []},
   ]}), /Invalid Firefox lookup request/);
+});
+
+test('Firefox lookup messaging crosses worlds as bounded JSON strings with stage errors', () => {
+  const item = {id: 'session-a', bars: [
+    ['2025-03-12', 1, 2, 1, 2, 10],
+    ['2025-03-13', 2, 3, 2, 3, 20],
+    ['2025-03-14', 3, 4, 3, 4, 30],
+  ]};
+  const request = encodeLookupRequest([item]);
+  assert.deepEqual(Object.keys(request).sort(), ['payload', 'type']);
+  assert.equal(typeof request.payload, 'string');
+  assert.deepEqual(decodeLookupRequest(request), {type: LOOKUP_MESSAGE_TYPE, lookups: [item]});
+
+  const result = [{id: item.id, status: 'unknown'}];
+  const response = encodeLookupResponse(result);
+  assert.equal(response.type, LOOKUP_RESPONSE_TYPE);
+  assert.deepEqual(Object.keys(response).sort(), ['payload', 'type']);
+  assert.deepEqual(decodeLookupResponse(response, 1), result);
+  assert.throws(() => decodeLookupResponse({type: LOOKUP_ERROR_TYPE,
+    stage: 'db-load', message: 'Database checksum mismatch'}, 1), error =>
+    error.stage === 'db-load' && /checksum/.test(error.message));
 });
 
 test('Firefox background accepts quiz content messages without comparing browser-specific sender IDs', () => {

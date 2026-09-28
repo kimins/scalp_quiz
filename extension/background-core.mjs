@@ -13,15 +13,18 @@ export function isQuizPageSender(sender) {
 }
 
 export function createLookupHandler(loadDB) {
-  return async message => {
+  return async (message, onStage = () => {}) => {
+    onStage('request-validation');
     if (message?.type !== LOOKUP_MESSAGE_TYPE || !Array.isArray(message.lookups) ||
         message.lookups.length > 24 || message.lookups.some(item =>
           typeof item?.id !== 'string' || !item.id || item.id.length > 128 ||
           !Array.isArray(item.bars) || item.bars.length !== 3))
       throw new Error('Invalid Firefox lookup request');
 
+    onStage('db-load');
     const db = await loadDB();
-    return Promise.all(message.lookups.map(async item => {
+    onStage('fingerprint-lookup');
+    const results = await Promise.all(message.lookups.map(async item => {
       const matches = await db.lookup(item.bars);
       if (matches.length === 0) return {id: item.id, status: 'unknown'};
       if (matches.length > 1) return {id: item.id, status: 'ambiguous'};
@@ -34,5 +37,7 @@ export function createLookupHandler(loadDB) {
         nextReturnBps: match.nextReturnBps,
       }};
     }));
+    onStage('response-build');
+    return results;
   };
 }

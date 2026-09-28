@@ -1,5 +1,59 @@
 export const MESSAGE_TYPE = 'SCALP_QUIZ_SESSIONS';
 export const LOOKUP_MESSAGE_TYPE = 'SCALP_QUIZ_LOOKUP_BATCH';
+export const LOOKUP_RESPONSE_TYPE = 'SCALP_QUIZ_LOOKUP_RESULT';
+export const LOOKUP_ERROR_TYPE = 'SCALP_QUIZ_LOOKUP_ERROR';
+
+export function encodeLookupRequest(items) {
+  if (!Array.isArray(items) || items.length > 24) throw new Error('Invalid lookup batch');
+  return {type: LOOKUP_MESSAGE_TYPE, payload: JSON.stringify({lookups:
+    items.map(({id, bars}) => ({id: String(id), bars}))})};
+}
+
+export function decodeLookupRequest(message) {
+  if (message?.type !== LOOKUP_MESSAGE_TYPE || typeof message.payload !== 'string' ||
+      message.payload.length > 262144) throw new Error('Invalid lookup message envelope');
+  let body;
+  try {
+    body = JSON.parse(message.payload);
+  } catch {
+    throw new Error('Invalid lookup JSON payload');
+  }
+  return {type: LOOKUP_MESSAGE_TYPE, lookups: body?.lookups};
+}
+
+export function encodeLookupResponse(results) {
+  return {type: LOOKUP_RESPONSE_TYPE, payload: JSON.stringify(results)};
+}
+
+export function decodeLookupResponse(response, expectedCount) {
+  if (response?.type === LOOKUP_ERROR_TYPE) {
+    const error = new Error(String(response.message || 'Background lookup failed'));
+    error.stage = typeof response.stage === 'string' ? response.stage : 'background';
+    throw error;
+  }
+  if (response?.type !== LOOKUP_RESPONSE_TYPE || typeof response.payload !== 'string' ||
+      response.payload.length > 262144) {
+    const error = new Error('Invalid Firefox response envelope');
+    error.stage = 'runtime-response';
+    throw error;
+  }
+  let results;
+  try {
+    results = JSON.parse(response.payload);
+  } catch {
+    const error = new Error('Invalid Firefox response JSON');
+    error.stage = 'response-decode';
+    throw error;
+  }
+  if (!Array.isArray(results) || results.length !== expectedCount || results.some(item =>
+      !item || typeof item.id !== 'string' ||
+      !['match', 'unknown', 'ambiguous'].includes(item.status))) {
+    const error = new Error('Invalid Firefox lookup result list');
+    error.stage = 'response-decode';
+    throw error;
+  }
+  return results;
+}
 
 function integer(value) {
   if (Number.isSafeInteger(value)) return value;

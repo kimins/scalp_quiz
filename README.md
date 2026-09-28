@@ -155,6 +155,8 @@ XPI는 기본적으로 현재 manifest 버전이 포함된 `dist/scalp-quiz-look
 
 `python scripts/package_firefox.py`로 XPI를 만든 뒤 임시 폴더에 압축을 풀고, Firefox의 `about:debugging#/runtime/this-firefox`에서 **Load Temporary Add-on**을 눌러 압축을 푼 폴더의 `manifest.json`을 선택합니다. 퀴즈 페이지를 열고 Browser Console(`Ctrl+Shift+J`)에서 `[scalp-quiz]` 로그를 확인하면 DB 로드와 메시지 전달 문제를 구분할 수 있습니다. PC에서 통과해도 Android 고유 차이가 남으므로 마지막으로 휴대폰에서도 확인해야 합니다.
 
+Firefox 진단 로그에는 `runtime-message`, `request-decode`, `request-validation`, `db-load`, `fingerprint-lookup`, `response-encode` 중 실패한 단계가 표시됩니다. 메시지 경계에는 종목 데이터 JSON 문자열만 보내며, 로그에는 세션·쿠키·요청 헤더를 남기지 않습니다.
+
 `web/lookup.mjs`는 Web Crypto와 fetch를 사용하는 ES module입니다. manifest/종목 테이블/바이너리를 확장 `db/`에 복사합니다. 다음 예시는 확장 페이지 또는 module service worker에서 실행합니다.
 
 ```js
