@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Scalp Quiz Lookup",
+  "version": "0.1.0",
+  "description": "Show local stock and next-day return matches on scalp quiz cards.",
+  "content_scripts": [
+    {
+      "matches": ["https://scalping.kro.kr/quiz*"],
+      "js": ["page-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://scalping.kro.kr/quiz*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["quiz-core.mjs", "lookup.mjs", "db/manifest.json", "db/stocks-*.json", "db/w3-*.bin"],
+      "matches": ["https://scalping.kro.kr/*"]
+    }
+  ]
+}

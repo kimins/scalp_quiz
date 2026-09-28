@@ -33,7 +33,7 @@ python -m scalp_db verify --cache cache
 - 종목 목록: [KRX KIND 상장법인목록](https://kind.krx.co.kr/corpgeneral/corpList.do?method=loadInitPage)의 공개 Excel 다운로드(EUC-KR HTML). 동일 회사의 지역별 중복 행을 합칩니다.
 - 일봉: [네이버 차트 공개 응답](https://fchart.stock.naver.com/sise.nhn?symbol=005930&timeframe=day&count=3000&requestType=0). 같은 endpoint를 [FinanceDataReader Naver reader](https://github.com/FinanceData/FinanceDataReader/blob/master/src/FinanceDataReader/naver/data.py)에서도 사용합니다.
 - KIND는 **현재 상장법인** 목록입니다. 과거 상장폐지 종목, 모든 우선주·ETF·ETN을 포함하는 역사적 전체 증권 목록이 아닙니다. 기본 목록만으로 과거 문제 100% 커버리지를 보장하지 않습니다.
-- 가격은 `naver-as-served`입니다. 수정주가 적용·과거 값 재조정이 있을 수 있습니다. 퀴즈가 다른 제공자, 비수정 가격, 반올림 또는 정규화된 가격을 쓰면 일치하지 않을 수 있습니다. 실제 퀴즈 응답 어댑터/확장 UI는 아직 구현하지 않았습니다.
+- 가격은 `naver-as-served`입니다. 수정주가 적용·과거 값 재조정이 있을 수 있습니다. 퀴즈가 다른 제공자, 비수정 가격, 반올림 또는 정규화된 가격을 쓰면 일치하지 않을 수 있습니다. 일치하지 않는 퀴즈 일봉은 확장에서 `미조회`로 표시합니다.
 - 외부 endpoint의 정책·스키마 변경 시 오류로 보고합니다. 공개 접근과 재배포 권한은 별개이므로 DB 배포 전에 소스 이용조건을 확인하세요.
 
 추가 종목은 UTF-8 CSV로 지정합니다. `--symbols`는 기본 목록을 **대체**하므로 필요한 종목을 모두 넣습니다. 숫자 코드 앞의 0을 보존하며 영숫자 코드도 지원합니다.
@@ -105,6 +105,26 @@ SHA-256 결과의 첫 8바이트를 사용합니다. 종목코드는 해시에 �
 수익률은 `(다음 종가 - 마지막 종가) / 마지막 종가 × 10000`을 정수로 반올림합니다. 정확히 절반이면 0에서 멀어지는 방향입니다. `300`은 `+3.00%`, `-69`는 `-0.69%`입니다. 가격제한폭 가정으로 값을 잘라내지 않습니다.
 
 ## Chrome 로컬 조회
+
+### 퀴즈 페이지 확장 개발 모드
+
+전체 시장 수집과 window=3 DB 생성이 끝난 상태에서 저장소 루트에서 한 번 실행합니다. 이 명령은 `data/lookup/manifest.json`이 가리키는 종목 테이블과 바이너리만 SHA-256으로 확인해 `extension/db/`로 복사하고, `web/lookup.mjs`도 확장에 복사합니다. 이전 빌드의 미사용 파일은 제거합니다. `extension/db/`와 복사된 모듈은 Git에 포함하지 않습니다.
+
+```sh
+python scripts/prepare_extension.py
+```
+
+Chrome에서 `chrome://extensions` → **Developer mode** → **Load unpacked** → 저장소의 `extension/` 폴더를 선택합니다. `https://scalping.kro.kr/quiz`로 이동해 퀴즈를 시작하면 각 차트 카드 오른쪽 위에 `종목명 | 다음 거래일 등락률`이 표시됩니다. 새 round를 만들거나 페이지를 새로고침해 표시가 갱신되는지 확인합니다. 확장 파일을 수정했다면 `chrome://extensions`에서 확장을 새로고침한 뒤 페이지도 새로고침하세요.
+
+확장은 이 사이트의 `/quiz` 경로에서만 실행되며 별도 Chrome 권한이나 외부 서버 호출이 없습니다. 페이지 MAIN world의 hook은 `fetch`와 `XMLHttpRequest`의 `/api/quiz/state`, `/api/quiz/round` 응답에서 session ID, 진입가, 마지막 3개 일봉만 전달합니다. isolated content script가 DB를 페이지당 한 번 로드하고 각 카드에 결과를 붙입니다. 먼저 로드된 round는 동일 출처의 `GET /api/quiz/state`로 복구합니다. 쿠키·CSRF 토큰·전체 API 응답은 전달하거나 저장하지 않습니다. 결과가 없으면 `미조회`, 여러 개면 `복수 후보`, 마지막 종가와 진입가가 다르면 `가격 불일치`로 표시합니다.
+
+확장 단위 및 로컬 DB 통합 테스트:
+
+```sh
+node --test tests/extension.test.mjs
+```
+
+캐시와 DB가 없는 CI에서는 HAR 통합 항목만 건너뜁니다. 로컬에서 해당 두 폴더가 있으면 HAR 6개 사례를 실제 3일 DB에서 모두 조회합니다.
 
 `web/lookup.mjs`는 Web Crypto와 fetch를 사용하는 ES module입니다. manifest/종목 테이블/바이너리를 확장 `db/`에 복사합니다. 다음 예시는 확장 페이지 또는 module service worker에서 실행합니다.
 

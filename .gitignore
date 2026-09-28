@@ -6,6 +6,8 @@ build/
 dist/
 cache/
 data/
+extension/db/
+extension/lookup.mjs
 *.tmp
 .env
 .env.*
