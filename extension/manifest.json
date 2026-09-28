@@ -1,8 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Scalp Quiz Lookup",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Show local stock and next-day return matches on scalp quiz cards.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{a754f145-ea07-4a8f-a046-ce76d31fce71}",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    },
+    "gecko_android": {
+      "strict_min_version": "128.0"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://scalping.kro.kr/quiz*"],

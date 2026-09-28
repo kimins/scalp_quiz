@@ -1,9 +1,15 @@
-// Runs in Chrome's isolated world. Only the two packaged modules and DB are loaded.
+// Runs in the isolated content-script world. Only packaged modules and DB are loaded.
 (() => {
   'use strict';
 
-  const corePromise = import(chrome.runtime.getURL('quiz-core.mjs'));
-  const lookupModulePromise = import(chrome.runtime.getURL('lookup.mjs'));
+  const extensionRuntime = globalThis.browser?.runtime ?? globalThis.chrome?.runtime;
+  if (!extensionRuntime?.getURL) {
+    console.error('[scalp-quiz] extension runtime API unavailable');
+    return;
+  }
+  const extensionURL = path => extensionRuntime.getURL(path);
+  const corePromise = import(extensionURL('quiz-core.mjs'));
+  const lookupModulePromise = import(extensionURL('lookup.mjs'));
   let dbPromise;
   let generation = 0;
   let currentSessions = [];
@@ -23,7 +29,7 @@
   function loadDB() {
     if (!dbPromise) {
       dbPromise = lookupModulePromise
-        .then(({LookupDB}) => LookupDB.load(chrome.runtime.getURL('db/'), 3))
+        .then(({LookupDB}) => LookupDB.load(extensionURL('db/'), 3))
         .then(db => {
           console.info('[scalp-quiz] DB loaded');
           return db;
