@@ -34,7 +34,8 @@ def package(output=None):
     db_manifest = json.loads((extension / "db" / "manifest.json").read_text(encoding="utf-8"))
     # Firefox uses event pages for MV3; Chrome uses a service worker and ignores
     # this Firefox package-specific background declaration.
-    packaged_manifest = {**manifest, "background": {"scripts": ["background.js"]}}
+    packaged_manifest = {**manifest, "background": {
+        "scripts": ["background.js"], "type": "module"}}
     assets = [f"db/{db_manifest['stocksFile']}"]
     assets.extend(f"db/{entry['file']}" for entry in db_manifest["files"])
     files = sorted(set(STATIC_FILES) | {"db/manifest.json"} | set(assets))

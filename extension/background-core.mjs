@@ -1,6 +1,17 @@
 import {LOOKUP_MESSAGE_TYPE} from './quiz-core.mjs';
 export {LOOKUP_MESSAGE_TYPE};
 
+export function isQuizPageSender(sender) {
+  if (typeof sender?.url !== 'string') return false;
+  try {
+    const url = new URL(sender.url);
+    return url.origin === 'https://scalping.kro.kr' &&
+      (url.pathname === '/quiz' || url.pathname.startsWith('/quiz/'));
+  } catch {
+    return false;
+  }
+}
+
 export function createLookupHandler(loadDB) {
   return async message => {
     if (message?.type !== LOOKUP_MESSAGE_TYPE || !Array.isArray(message.lookups) ||

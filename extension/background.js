@@ -1,32 +1,32 @@
-// Firefox MV3 runs this as an event page. It loads DB assets in the extension
-// origin so page CSP and content-script request rules cannot block local lookup.
-(() => {
-  'use strict';
+// Firefox MV3 runs this as a non-persistent event page. The Firefox package
+// declares it as a module so its local dependencies load before listeners run.
+import {LookupDB} from './lookup.mjs';
+import {createLookupHandler, isQuizPageSender, LOOKUP_MESSAGE_TYPE} from './background-core.mjs';
 
-  const extensionRuntime = globalThis.browser?.runtime;
-  if (!extensionRuntime?.onMessage || !extensionRuntime?.getURL) {
-    console.error('[scalp-quiz] Firefox background runtime unavailable');
-    return;
-  }
-
+const extensionRuntime = globalThis.browser?.runtime;
+if (!extensionRuntime?.onMessage || !extensionRuntime?.getURL) {
+  console.error('[scalp-quiz] Firefox background runtime unavailable');
+} else {
   let dbPromise;
-  const helperPromise = import(extensionRuntime.getURL('background-core.mjs'));
 
   function loadDB() {
     if (!dbPromise) {
-      dbPromise = import(extensionRuntime.getURL('lookup.mjs'))
-        .then(({LookupDB}) => LookupDB.load(extensionRuntime.getURL('db/'), 3))
-        .then(db => {
-          console.info('[scalp-quiz] DB loaded');
-          return db;
-        });
+      dbPromise = LookupDB.load(extensionRuntime.getURL('db/'), 3).then(db => {
+        console.info('[scalp-quiz] DB loaded');
+        return db;
+      }).catch(error => {
+        dbPromise = null;
+        throw error;
+      });
     }
     return dbPromise;
   }
 
+  const handleLookup = createLookupHandler(loadDB);
   extensionRuntime.onMessage.addListener((message, sender) => {
-    if (sender?.id !== extensionRuntime.id || message?.type !== 'SCALP_QUIZ_LOOKUP_BATCH')
-      return undefined;
-    return helperPromise.then(({createLookupHandler}) => createLookupHandler(loadDB)(message));
+    // Firefox may expose an internal UUID as sender.id. Runtime onMessage is
+    // extension-local, so constrain this request by the exact quiz page URL.
+    if (message?.type !== LOOKUP_MESSAGE_TYPE || !isQuizPageSender(sender)) return undefined;
+    return handleLookup(message);
   });
-})();
+}

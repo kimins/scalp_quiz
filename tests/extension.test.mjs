@@ -8,7 +8,7 @@ import {test} from 'node:test';
 import {LookupDB} from '../web/lookup.mjs';
 import {normalizeSession, sessionsFromMessage, formatReturnBps, renderAnnotations} from
   '../extension/quiz-core.mjs';
-import {createLookupHandler, LOOKUP_MESSAGE_TYPE} from '../extension/background-core.mjs';
+import {createLookupHandler, isQuizPageSender, LOOKUP_MESSAGE_TYPE} from '../extension/background-core.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cases = JSON.parse(await readFile(path.join(root, 'tests/fixtures/quiz_har_cases.json'), 'utf8'));
@@ -89,6 +89,16 @@ test('Firefox background batches lookups and loads the DB once', async () => {
   await assert.rejects(handle({type: LOOKUP_MESSAGE_TYPE, lookups: [
     {id: 'bad', bars: []},
   ]}), /Invalid Firefox lookup request/);
+});
+
+test('Firefox background accepts quiz content messages without comparing browser-specific sender IDs', () => {
+  assert.equal(isQuizPageSender({id: 'internal-firefox-uuid',
+    url: 'https://scalping.kro.kr/quiz?round=123'}), true);
+  assert.equal(isQuizPageSender({id: 'expected-addon-id',
+    url: 'https://scalping.kro.kr/not-quiz'}), false);
+  assert.equal(isQuizPageSender({url: 'https://evil.example/quiz'}), false);
+  assert.equal(isQuizPageSender({url: 'not-a-url'}), false);
+  assert.equal(isQuizPageSender({}), false);
 });
 
 test('manifest declares Firefox Android support and required execution worlds', async () => {

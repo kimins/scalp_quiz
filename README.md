@@ -151,6 +151,10 @@ python scripts/package_firefox.py
 
 XPI는 기본적으로 현재 manifest 버전이 포함된 `dist/scalp-quiz-lookup-<version>.xpi`에 생성됩니다. Firefox용 패키지는 MV3 event page를 포함하며, Firefox Android에서 페이지 보안 정책이 DB 파일 읽기를 막지 않도록 확장 문맥에서 DB lookup을 수행합니다. 생성된 unsigned XPI를 AMO에 unlisted/self-distribution용으로 제출해 서명받은 뒤 Android Firefox에서 파일로 설치할 수 있습니다. [Firefox Android 설치 절차](https://extensionworkshop.com/documentation/publish/install-self-distributed/). 이 저장소는 AMO 계정에 제출하거나 공개하지 않습니다.
 
+#### PC Firefox에서 먼저 진단
+
+`python scripts/package_firefox.py`로 XPI를 만든 뒤 임시 폴더에 압축을 풀고, Firefox의 `about:debugging#/runtime/this-firefox`에서 **Load Temporary Add-on**을 눌러 압축을 푼 폴더의 `manifest.json`을 선택합니다. 퀴즈 페이지를 열고 Browser Console(`Ctrl+Shift+J`)에서 `[scalp-quiz]` 로그를 확인하면 DB 로드와 메시지 전달 문제를 구분할 수 있습니다. PC에서 통과해도 Android 고유 차이가 남으므로 마지막으로 휴대폰에서도 확인해야 합니다.
+
 `web/lookup.mjs`는 Web Crypto와 fetch를 사용하는 ES module입니다. manifest/종목 테이블/바이너리를 확장 `db/`에 복사합니다. 다음 예시는 확장 페이지 또는 module service worker에서 실행합니다.
 
 ```js
