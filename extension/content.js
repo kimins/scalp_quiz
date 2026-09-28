@@ -7,9 +7,12 @@
     console.error('[scalp-quiz] extension runtime API unavailable');
     return;
   }
+  const extensionManifest = extensionRuntime.getManifest?.() || {};
+  const firefoxRuntime = Array.isArray(extensionManifest.background?.scripts) &&
+    extensionManifest.background.scripts.includes('background.js') ? extensionRuntime : null;
   const extensionURL = path => extensionRuntime.getURL(path);
   const corePromise = import(extensionURL('quiz-core.mjs'));
-  const lookupModulePromise = import(extensionURL('lookup.mjs'));
+  const lookupModulePromise = firefoxRuntime ? null : import(extensionURL('lookup.mjs'));
   let dbPromise;
   let generation = 0;
   let currentSessions = [];
@@ -28,6 +31,7 @@
 
   function loadDB() {
     if (!dbPromise) {
+      if (!lookupModulePromise) throw new Error('Local lookup is unavailable');
       dbPromise = lookupModulePromise
         .then(({LookupDB}) => LookupDB.load(extensionURL('db/'), 3))
         .then(db => {
@@ -36,6 +40,53 @@
         });
     }
     return dbPromise;
+  }
+
+  async function queryDB(items) {
+    if (firefoxRuntime) {
+      const {encodeLookupRequest, decodeLookupResponse} = await corePromise;
+      console.info(`[scalp-quiz] Firefox lookup request sessions=${items.length}`);
+      let response;
+      try {
+        response = await firefoxRuntime.sendMessage(encodeLookupRequest(items));
+      } catch (error) {
+        const failure = new Error(String(error?.message || 'Firefox message transport failed'));
+        failure.stage = 'runtime-message';
+        throw failure;
+      }
+      const results = decodeLookupResponse(response, items.length);
+      return new Map(results.map(item => [item.id, item]));
+    }
+
+    const db = await loadDB();
+    const response = await Promise.all(items.map(async item => {
+      const matches = await db.lookup(item.bars);
+      if (matches.length === 0) return {id: item.id, status: 'unknown'};
+      if (matches.length > 1) return {id: item.id, status: 'ambiguous'};
+      const match = matches[0];
+      return {id: item.id, status: 'match', match: {
+        code: match.code, name: match.name, lastDate: match.lastDate,
+        nextDate: match.nextDate, nextReturnBps: match.nextReturnBps,
+      }};
+    }));
+    return new Map(response.map(item => [item.id, item]));
+  }
+
+  function resultFromLookup(item, lookup, formatReturnBps, index) {
+    if (!item?.bars) {
+      if (item?.reason === 'entry-mismatch')
+        console.warn(`[scalp-quiz] card ${index + 1}: entry_price differs from last close`);
+      return [item.id, {text: item.reason === 'entry-mismatch' ? '가격 불일치' : '미조회',
+        tone: item.reason === 'entry-mismatch' ? 'error' : 'unknown'}];
+    }
+    if (!lookup || lookup.status === 'unknown') return [item.id, {text: '미조회', tone: 'unknown'}];
+    if (lookup.status === 'ambiguous') return [item.id, {text: '복수 후보', tone: 'ambiguous'}];
+    if (lookup.status !== 'match' || !lookup.match) return [item.id, {text: '미조회', tone: 'unknown'}];
+    const match = lookup.match;
+    const percent = formatReturnBps(match.nextReturnBps);
+    console.info(`[scalp-quiz] ${match.code} ${match.name} ${percent}`);
+    return [item.id, {text: `${match.name} | ${percent}`,
+      tone: match.nextReturnBps > 0 ? 'positive' : match.nextReturnBps < 0 ? 'negative' : 'zero'}];
   }
 
   async function captureSessions(sessions) {
@@ -49,41 +100,27 @@
     console.info(`[scalp-quiz] captured ${sessions.length} sessions`);
     queueRender();
 
-    let db;
-    if (normalized.some(item => item?.bars)) {
+    let lookups = new Map();
+    const lookupItems = normalized.filter(item => item?.bars);
+    if (lookupItems.length) {
       try {
-        db = await loadDB();
-      } catch {
+        lookups = await queryDB(lookupItems);
+      } catch (error) {
         if (mine !== generation) return;
-        results = new Map(normalized.filter(Boolean).map(item =>
-          [item.id, {text: 'DB 오류', tone: 'error'}]));
-        console.warn('[scalp-quiz] DB load failed');
+        const failure = normalized.filter(Boolean).map((item, index) =>
+          item?.bars ? [item.id, {text: 'DB 오류', tone: 'error'}]
+            : resultFromLookup(item, null, formatReturnBps, index));
+        results = new Map(failure);
+        const detail = String(error?.message || 'unknown error').replace(/moz-extension:\/\/[^/\s]+/g,
+          'moz-extension://[extension]').slice(0, 240);
+        console.warn(`[scalp-quiz] DB lookup failed stage=${error?.stage || 'content-lookup'}: ${detail}`);
         queueRender();
         return;
       }
     }
 
-    const resolved = await Promise.all(normalized.map(async (item, index) => {
-      if (!item) return null;
-      if (!item.bars) {
-        if (item.reason === 'entry-mismatch')
-          console.warn(`[scalp-quiz] card ${index + 1}: entry_price differs from last close`);
-        return [item.id, {text: item.reason === 'entry-mismatch' ? '가격 불일치' : '미조회',
-          tone: item.reason === 'entry-mismatch' ? 'error' : 'unknown'}];
-      }
-      try {
-        const matches = await db.lookup(item.bars);
-        if (matches.length === 0) return [item.id, {text: '미조회', tone: 'unknown'}];
-        if (matches.length > 1) return [item.id, {text: '복수 후보', tone: 'ambiguous'}];
-        const match = matches[0];
-        const percent = formatReturnBps(match.nextReturnBps);
-        console.info(`[scalp-quiz] ${match.code} ${match.name} ${percent}`);
-        return [item.id, {text: `${match.name} | ${percent}`,
-          tone: match.nextReturnBps > 0 ? 'positive' : match.nextReturnBps < 0 ? 'negative' : 'zero'}];
-      } catch {
-        return [item.id, {text: '미조회', tone: 'unknown'}];
-      }
-    }));
+    const resolved = normalized.map((item, index) => item
+      ? resultFromLookup(item, lookups.get(item.id), formatReturnBps, index) : null);
     if (mine !== generation) return;
     results = new Map(resolved.filter(Boolean));
     queueRender();

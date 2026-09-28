@@ -6,8 +6,11 @@ import {fileURLToPath} from 'node:url';
 import vm from 'node:vm';
 import {test} from 'node:test';
 import {LookupDB} from '../web/lookup.mjs';
-import {normalizeSession, sessionsFromMessage, formatReturnBps, renderAnnotations} from
+import {normalizeSession, sessionsFromMessage, formatReturnBps, renderAnnotations,
+  encodeLookupRequest, decodeLookupRequest, encodeLookupResponse, decodeLookupResponse,
+  LOOKUP_ERROR_TYPE, LOOKUP_RESPONSE_TYPE} from
   '../extension/quiz-core.mjs';
+import {createLookupHandler, isQuizPageSender, LOOKUP_MESSAGE_TYPE} from '../extension/background-core.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cases = JSON.parse(await readFile(path.join(root, 'tests/fixtures/quiz_har_cases.json'), 'utf8'));
@@ -40,7 +43,7 @@ test('normalizes the last three quiz candles and refuses mismatched entry price'
   assert.equal(formatReturnBps(0), '0.00%');
 });
 
-test('accepts only same-window, same-origin, minimal session messages', () => {
+test('copies minimal session data out of Firefox page wrappers and validates message source', () => {
   const source = {};
   const session = asSession([
     ['2025-03-12', 2, 3, 2, 3, 20],
@@ -50,6 +53,18 @@ test('accepts only same-window, same-origin, minimal session messages', () => {
   const event = {source, origin: 'https://scalping.kro.kr',
     data: {type: 'SCALP_QUIZ_SESSIONS', sessions: [session]}};
   assert.deepEqual(sessionsFromMessage(event, source, event.origin), [session]);
+  const denyConstructor = value => new Proxy(value, {get(target, property, receiver) {
+    if (property === 'constructor') throw new Error('Permission denied to access property "constructor"');
+    return Reflect.get(target, property, receiver);
+  }});
+  const wrappedSession = denyConstructor({...session, chart_candles:
+    denyConstructor(session.chart_candles.map(candle => denyConstructor(candle)))});
+  const wrappedEvent = {...event, data: denyConstructor({type: event.data.type,
+    sessions: denyConstructor([wrappedSession])})};
+  const copied = sessionsFromMessage(wrappedEvent, source, event.origin);
+  assert.notEqual(copied[0], wrappedSession);
+  assert.notEqual(copied[0].chart_candles, wrappedSession.chart_candles);
+  assert.deepEqual(structuredClone(copied), [session]);
   assert.equal(sessionsFromMessage({...event, source: {}}, source, event.origin), null);
   assert.equal(sessionsFromMessage({...event, origin: 'https://elsewhere.example'}, source, event.origin), null);
   assert.equal(sessionsFromMessage({...event, data: {...event.data, type: 'OTHER'}}, source, event.origin), null);
@@ -57,6 +72,70 @@ test('accepts only same-window, same-origin, minimal session messages', () => {
   assert.equal(sessionsFromMessage({...event, data: {...event.data, sessions: [
     {...session, chart_candles: [...session.chart_candles, session.chart_candles[2]]},
   ]}}, source, event.origin), null);
+});
+
+test('Firefox background batches lookups and loads the DB once', async () => {
+  let loads = 0;
+  const fakeDB = {lookup: async bars => {
+    if (bars[2][1] === 3) return [{code: '225570', name: '넥슨게임즈',
+      lastDate: '2025-03-14', nextDate: '2025-03-17', nextReturnBps: 0}];
+    return [];
+  }};
+  const handle = createLookupHandler(async () => { loads++; return fakeDB; });
+  const stages = [];
+  const result = await handle({type: LOOKUP_MESSAGE_TYPE, lookups: [
+    {id: 'session-a', bars: [
+      ['2025-03-12', 1, 2, 1, 2, 10],
+      ['2025-03-13', 2, 3, 2, 3, 20],
+      ['2025-03-14', 3, 4, 3, 4, 30],
+    ]},
+    {id: 'session-b', bars: [
+      ['2025-03-12', 5, 6, 5, 6, 10],
+      ['2025-03-13', 6, 7, 6, 7, 20],
+      ['2025-03-14', 7, 8, 7, 8, 30],
+    ]},
+  ]}, stage => stages.push(stage));
+  assert.equal(loads, 1);
+  assert.deepEqual(stages, ['request-validation', 'db-load', 'fingerprint-lookup', 'response-build']);
+  assert.deepEqual(result.map(item => [item.id, item.status]), [
+    ['session-a', 'match'], ['session-b', 'unknown'],
+  ]);
+  assert.deepEqual(result[0].match, {code: '225570', name: '넥슨게임즈',
+    lastDate: '2025-03-14', nextDate: '2025-03-17', nextReturnBps: 0});
+  await assert.rejects(handle({type: LOOKUP_MESSAGE_TYPE, lookups: [
+    {id: 'bad', bars: []},
+  ]}), /Invalid Firefox lookup request/);
+});
+
+test('Firefox lookup messaging crosses worlds as bounded JSON strings with stage errors', () => {
+  const item = {id: 'session-a', bars: [
+    ['2025-03-12', 1, 2, 1, 2, 10],
+    ['2025-03-13', 2, 3, 2, 3, 20],
+    ['2025-03-14', 3, 4, 3, 4, 30],
+  ]};
+  const request = encodeLookupRequest([item]);
+  assert.deepEqual(Object.keys(request).sort(), ['payload', 'type']);
+  assert.equal(typeof request.payload, 'string');
+  assert.deepEqual(decodeLookupRequest(request), {type: LOOKUP_MESSAGE_TYPE, lookups: [item]});
+
+  const result = [{id: item.id, status: 'unknown'}];
+  const response = encodeLookupResponse(result);
+  assert.equal(response.type, LOOKUP_RESPONSE_TYPE);
+  assert.deepEqual(Object.keys(response).sort(), ['payload', 'type']);
+  assert.deepEqual(decodeLookupResponse(response, 1), result);
+  assert.throws(() => decodeLookupResponse({type: LOOKUP_ERROR_TYPE,
+    stage: 'db-load', message: 'Database checksum mismatch'}, 1), error =>
+    error.stage === 'db-load' && /checksum/.test(error.message));
+});
+
+test('Firefox background accepts quiz content messages without comparing browser-specific sender IDs', () => {
+  assert.equal(isQuizPageSender({id: 'internal-firefox-uuid',
+    url: 'https://scalping.kro.kr/quiz?round=123'}), true);
+  assert.equal(isQuizPageSender({id: 'expected-addon-id',
+    url: 'https://scalping.kro.kr/not-quiz'}), false);
+  assert.equal(isQuizPageSender({url: 'https://evil.example/quiz'}), false);
+  assert.equal(isQuizPageSender({url: 'not-a-url'}), false);
+  assert.equal(isQuizPageSender({}), false);
 });
 
 test('manifest declares Firefox Android support and required execution worlds', async () => {
@@ -70,6 +149,7 @@ test('manifest declares Firefox Android support and required execution worlds', 
   const content = await readFile(path.join(root, 'extension/content.js'), 'utf8');
   assert.match(content, /globalThis\.browser\?\.runtime/);
   assert.match(content, /globalThis\.chrome\?\.runtime/);
+  assert.match(content, /background\.scripts\.includes\('background\.js'\)/);
 });
 
 test('MAIN-world hook captures fetch and XHR but forwards no auth or extra response fields', async () => {
@@ -154,6 +234,7 @@ test('packaged window=3 DB resolves all six HAR regression cases', async t => {
   ]);
   const db = new LookupDB(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
     JSON.parse(stocks), 3);
+  const backgroundLookups = [];
   for (const fixture of cases) {
     const cachePath = path.join(root, 'cache/bars', `${fixture.code}.json`);
     if (!existsSync(cachePath)) return t.skip('local collected cache is unavailable');
@@ -170,5 +251,19 @@ test('packaged window=3 DB resolves all six HAR regression cases', async t => {
     assert.equal(matches[0].lastDate, fixture.lastBar[0]);
     assert.equal(matches[0].nextDate, fixture.nextDate);
     assert.equal(matches[0].nextReturnBps, fixture.nextReturnBps);
+    backgroundLookups.push({id: fixture.code, bars: item.bars});
+  }
+  let backgroundLoads = 0;
+  const handle = createLookupHandler(async () => { backgroundLoads++; return db; });
+  const backgroundResults = await handle({type: LOOKUP_MESSAGE_TYPE, lookups: backgroundLookups});
+  assert.equal(backgroundLoads, 1);
+  for (const fixture of cases) {
+    const result = backgroundResults.find(item => item.id === fixture.code);
+    assert.equal(result.status, 'match', fixture.code);
+    assert.equal(result.match.code, fixture.code);
+    assert.equal(result.match.name, fixture.name);
+    assert.equal(result.match.lastDate, fixture.lastBar[0]);
+    assert.equal(result.match.nextDate, fixture.nextDate);
+    assert.equal(result.match.nextReturnBps, fixture.nextReturnBps);
   }
 });
