@@ -130,13 +130,26 @@ node --test tests/extension.test.mjs
 
 Firefox의 `world: MAIN` 지원이 포함된 Firefox 128 이상을 대상으로 합니다. Manifest에는 Gecko ID, Android 호환 표시, AMO의 데이터 수집 선언(`none`)이 있습니다. Firefox의 MAIN world 지원 시작 버전과 Android용 manifest 설정은 [MDN content_scripts](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/content_scripts), [MDN browser_specific_settings](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/browser_specific_settings)에 맞췄습니다.
 
-Android Firefox는 Chrome의 Load unpacked와 같은 확장 설치 흐름을 제공하지 않습니다. Android에서 설치하려면 XPI를 서명하고 AMO에 등록한 뒤 Android 호환으로 배포해야 합니다. 패키지를 만들려면:
+#### 기기에서 임시 테스트
+
+임시 테스트 설치에는 서명이 필요 없습니다. Android 기기에서 USB debugging을 켜고 ADB로 개발 컴퓨터에 연결한 뒤, 저장소 루트에서 실행합니다. `web-ext`가 설치되어 있어야 합니다.
+
+```sh
+python scripts/prepare_extension.py
+npx web-ext run --source-dir extension --target=firefox-android --firefox-apk org.mozilla.firefox
+```
+
+다른 설치 채널은 `--firefox-apk` 값을 `org.mozilla.firefox_beta` 또는 `org.mozilla.fenix`로 바꿉니다. `web-ext run`이 확장을 임시 로드하므로 Firefox를 종료하면 테스트 설치가 사라집니다. Android 기기 연결과 임시 설치 절차는 [Firefox Extension Workshop](https://extensionworkshop.com/documentation/develop/developing-extensions-for-firefox-for-android/)에 정리되어 있습니다.
+
+#### XPI 설치용 패키지
+
+XPI 파일을 Android Firefox에 직접 설치해 쓰려면 Mozilla 서명이 필요합니다. 공개 등록은 필수가 아니며, AMO에서 self-distribution용 unlisted 서명을 받을 수 있습니다. 패키지를 만들려면:
 
 ```sh
 python scripts/package_firefox.py
 ```
 
-XPI는 기본적으로 `dist/scalp-quiz-lookup-0.2.0.xpi`에 생성됩니다. `extension/db/`와 `extension/lookup.mjs`를 먼저 준비하고, AMO 개발자 페이지에서 이 XPI를 제출·서명한 다음 listing의 Android 호환을 설정합니다. 이 저장소는 AMO 계정에 제출하거나 공개하지 않습니다.
+XPI는 기본적으로 `dist/scalp-quiz-lookup-0.2.0.xpi`에 생성됩니다. 생성된 unsigned XPI를 AMO에 unlisted/self-distribution용으로 제출해 서명받은 뒤 Android Firefox에서 파일로 설치할 수 있습니다. [Firefox Android 설치 절차](https://extensionworkshop.com/documentation/publish/install-self-distributed/). 이 저장소는 AMO 계정에 제출하거나 공개하지 않습니다.
 
 `web/lookup.mjs`는 Web Crypto와 fetch를 사용하는 ES module입니다. manifest/종목 테이블/바이너리를 확장 `db/`에 복사합니다. 다음 예시는 확장 페이지 또는 module service worker에서 실행합니다.
 
