@@ -15,6 +15,8 @@ STATIC_FILES = (
     "manifest.json",
     "content.js",
     "page-hook.js",
+    "background.js",
+    "background-core.mjs",
     "quiz-core.mjs",
     "styles.css",
     "lookup.mjs",
@@ -30,6 +32,9 @@ def package(output=None):
         raise ValueError("Firefox ID and Android compatibility metadata are required")
 
     db_manifest = json.loads((extension / "db" / "manifest.json").read_text(encoding="utf-8"))
+    # Firefox uses event pages for MV3; Chrome uses a service worker and ignores
+    # this Firefox package-specific background declaration.
+    packaged_manifest = {**manifest, "background": {"scripts": ["background.js"]}}
     assets = [f"db/{db_manifest['stocksFile']}"]
     assets.extend(f"db/{entry['file']}" for entry in db_manifest["files"])
     files = sorted(set(STATIC_FILES) | {"db/manifest.json"} | set(assets))
@@ -46,7 +51,10 @@ def package(output=None):
     try:
         with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for relative in files:
-                archive.write(extension / relative, relative)
+                if relative == "manifest.json":
+                    archive.writestr(relative, json.dumps(packaged_manifest, ensure_ascii=False, indent=2) + "\n")
+                else:
+                    archive.write(extension / relative, relative)
         os.replace(temporary, output)
     finally:
         temporary.unlink(missing_ok=True)
@@ -60,8 +68,8 @@ def package(output=None):
         if damaged is not None:
             output.unlink(missing_ok=True)
             raise ValueError(f"XPI CRC check failed: {damaged}")
-        packaged_manifest = json.loads(archive.read("manifest.json"))
-        if packaged_manifest != manifest:
+        actual_manifest = json.loads(archive.read("manifest.json"))
+        if actual_manifest != packaged_manifest:
             output.unlink(missing_ok=True)
             raise ValueError("Packaged manifest mismatch")
 

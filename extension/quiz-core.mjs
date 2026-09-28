@@ -1,4 +1,5 @@
 export const MESSAGE_TYPE = 'SCALP_QUIZ_SESSIONS';
+export const LOOKUP_MESSAGE_TYPE = 'SCALP_QUIZ_LOOKUP_BATCH';
 
 function integer(value) {
   if (Number.isSafeInteger(value)) return value;

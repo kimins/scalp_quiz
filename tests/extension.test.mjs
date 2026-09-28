@@ -8,6 +8,7 @@ import {test} from 'node:test';
 import {LookupDB} from '../web/lookup.mjs';
 import {normalizeSession, sessionsFromMessage, formatReturnBps, renderAnnotations} from
   '../extension/quiz-core.mjs';
+import {createLookupHandler, LOOKUP_MESSAGE_TYPE} from '../extension/background-core.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cases = JSON.parse(await readFile(path.join(root, 'tests/fixtures/quiz_har_cases.json'), 'utf8'));
@@ -59,6 +60,37 @@ test('accepts only same-window, same-origin, minimal session messages', () => {
   ]}}, source, event.origin), null);
 });
 
+test('Firefox background batches lookups and loads the DB once', async () => {
+  let loads = 0;
+  const fakeDB = {lookup: async bars => {
+    if (bars[2][1] === 3) return [{code: '225570', name: '넥슨게임즈',
+      lastDate: '2025-03-14', nextDate: '2025-03-17', nextReturnBps: 0}];
+    return [];
+  }};
+  const handle = createLookupHandler(async () => { loads++; return fakeDB; });
+  const result = await handle({type: LOOKUP_MESSAGE_TYPE, lookups: [
+    {id: 'session-a', bars: [
+      ['2025-03-12', 1, 2, 1, 2, 10],
+      ['2025-03-13', 2, 3, 2, 3, 20],
+      ['2025-03-14', 3, 4, 3, 4, 30],
+    ]},
+    {id: 'session-b', bars: [
+      ['2025-03-12', 5, 6, 5, 6, 10],
+      ['2025-03-13', 6, 7, 6, 7, 20],
+      ['2025-03-14', 7, 8, 7, 8, 30],
+    ]},
+  ]});
+  assert.equal(loads, 1);
+  assert.deepEqual(result.map(item => [item.id, item.status]), [
+    ['session-a', 'match'], ['session-b', 'unknown'],
+  ]);
+  assert.deepEqual(result[0].match, {code: '225570', name: '넥슨게임즈',
+    lastDate: '2025-03-14', nextDate: '2025-03-17', nextReturnBps: 0});
+  await assert.rejects(handle({type: LOOKUP_MESSAGE_TYPE, lookups: [
+    {id: 'bad', bars: []},
+  ]}), /Invalid Firefox lookup request/);
+});
+
 test('manifest declares Firefox Android support and required execution worlds', async () => {
   const manifest = JSON.parse(await readFile(path.join(root, 'extension/manifest.json'), 'utf8'));
   assert.ok(manifest.browser_specific_settings.gecko.id);
@@ -70,6 +102,7 @@ test('manifest declares Firefox Android support and required execution worlds', 
   const content = await readFile(path.join(root, 'extension/content.js'), 'utf8');
   assert.match(content, /globalThis\.browser\?\.runtime/);
   assert.match(content, /globalThis\.chrome\?\.runtime/);
+  assert.match(content, /background\.scripts\.includes\('background\.js'\)/);
 });
 
 test('MAIN-world hook captures fetch and XHR but forwards no auth or extra response fields', async () => {
@@ -154,6 +187,7 @@ test('packaged window=3 DB resolves all six HAR regression cases', async t => {
   ]);
   const db = new LookupDB(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
     JSON.parse(stocks), 3);
+  const backgroundLookups = [];
   for (const fixture of cases) {
     const cachePath = path.join(root, 'cache/bars', `${fixture.code}.json`);
     if (!existsSync(cachePath)) return t.skip('local collected cache is unavailable');
@@ -170,5 +204,19 @@ test('packaged window=3 DB resolves all six HAR regression cases', async t => {
     assert.equal(matches[0].lastDate, fixture.lastBar[0]);
     assert.equal(matches[0].nextDate, fixture.nextDate);
     assert.equal(matches[0].nextReturnBps, fixture.nextReturnBps);
+    backgroundLookups.push({id: fixture.code, bars: item.bars});
+  }
+  let backgroundLoads = 0;
+  const handle = createLookupHandler(async () => { backgroundLoads++; return db; });
+  const backgroundResults = await handle({type: LOOKUP_MESSAGE_TYPE, lookups: backgroundLookups});
+  assert.equal(backgroundLoads, 1);
+  for (const fixture of cases) {
+    const result = backgroundResults.find(item => item.id === fixture.code);
+    assert.equal(result.status, 'match', fixture.code);
+    assert.equal(result.match.code, fixture.code);
+    assert.equal(result.match.name, fixture.name);
+    assert.equal(result.match.lastDate, fixture.lastBar[0]);
+    assert.equal(result.match.nextDate, fixture.nextDate);
+    assert.equal(result.match.nextReturnBps, fixture.nextReturnBps);
   }
 });

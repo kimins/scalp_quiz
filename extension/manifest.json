@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Scalp Quiz Lookup",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Show local stock and next-day return matches on scalp quiz cards.",
   "browser_specific_settings": {
     "gecko": {

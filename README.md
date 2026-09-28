@@ -116,7 +116,7 @@ python scripts/prepare_extension.py
 
 Chrome에서 `chrome://extensions` → **Developer mode** → **Load unpacked** → 저장소의 `extension/` 폴더를 선택합니다. `https://scalping.kro.kr/quiz`로 이동해 퀴즈를 시작하면 각 차트 카드 오른쪽 위에 `종목명 | 다음 거래일 등락률`이 표시됩니다. 새 round를 만들거나 페이지를 새로고침해 표시가 갱신되는지 확인합니다. 확장 파일을 수정했다면 `chrome://extensions`에서 확장을 새로고침한 뒤 페이지도 새로고침하세요.
 
-확장은 이 사이트의 `/quiz` 경로에서만 실행되며 별도 Chrome 권한이나 외부 서버 호출이 없습니다. 페이지 MAIN world의 hook은 `fetch`와 `XMLHttpRequest`의 `/api/quiz/state`, `/api/quiz/round` 응답에서 session ID, 진입가, 마지막 3개 일봉만 전달합니다. isolated content script가 DB를 페이지당 한 번 로드하고 각 카드에 결과를 붙입니다. 먼저 로드된 round는 동일 출처의 `GET /api/quiz/state`로 복구합니다. 쿠키·CSRF 토큰·전체 API 응답은 전달하거나 저장하지 않습니다. 결과가 없으면 `미조회`, 여러 개면 `복수 후보`, 마지막 종가와 진입가가 다르면 `가격 불일치`로 표시합니다.
+확장은 이 사이트의 `/quiz` 경로에서만 실행되며 별도 Chrome 권한이나 외부 서버 호출이 없습니다. 페이지 MAIN world의 hook은 `fetch`와 `XMLHttpRequest`의 `/api/quiz/state`, `/api/quiz/round` 응답에서 session ID, 진입가, 마지막 3개 일봉만 전달합니다. Chrome에서는 isolated content script가 DB를 로드하고, Firefox에서는 event background page가 확장 파일을 읽어 조회한 뒤 결과만 전달합니다. 두 경로 모두 여러 session이 같은 DB 인스턴스를 재사용하고 각 카드에 결과를 표시합니다. 먼저 로드된 round는 동일 출처의 `GET /api/quiz/state`로 복구합니다. 쿠키·CSRF 토큰·전체 API 응답은 전달하거나 저장하지 않습니다. 결과가 없으면 `미조회`, 여러 개면 `복수 후보`, 마지막 종가와 진입가가 다르면 `가격 불일치`로 표시합니다.
 
 확장 단위 및 로컬 DB 통합 테스트:
 
@@ -149,7 +149,7 @@ XPI 파일을 Android Firefox에 직접 설치해 쓰려면 Mozilla 서명이 �
 python scripts/package_firefox.py
 ```
 
-XPI는 기본적으로 `dist/scalp-quiz-lookup-0.2.0.xpi`에 생성됩니다. 생성된 unsigned XPI를 AMO에 unlisted/self-distribution용으로 제출해 서명받은 뒤 Android Firefox에서 파일로 설치할 수 있습니다. [Firefox Android 설치 절차](https://extensionworkshop.com/documentation/publish/install-self-distributed/). 이 저장소는 AMO 계정에 제출하거나 공개하지 않습니다.
+XPI는 기본적으로 현재 manifest 버전이 포함된 `dist/scalp-quiz-lookup-<version>.xpi`에 생성됩니다. Firefox용 패키지는 MV3 event page를 포함하며, Firefox Android에서 페이지 보안 정책이 DB 파일 읽기를 막지 않도록 확장 문맥에서 DB lookup을 수행합니다. 생성된 unsigned XPI를 AMO에 unlisted/self-distribution용으로 제출해 서명받은 뒤 Android Firefox에서 파일로 설치할 수 있습니다. [Firefox Android 설치 절차](https://extensionworkshop.com/documentation/publish/install-self-distributed/). 이 저장소는 AMO 계정에 제출하거나 공개하지 않습니다.
 
 `web/lookup.mjs`는 Web Crypto와 fetch를 사용하는 ES module입니다. manifest/종목 테이블/바이너리를 확장 `db/`에 복사합니다. 다음 예시는 확장 페이지 또는 module service worker에서 실행합니다.
 
